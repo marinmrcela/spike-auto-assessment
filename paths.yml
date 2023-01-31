@@ -1,0 +1,11 @@
+# Paths used by programs
+
+workingDir: "~/Documents/Spike Data"
+
+projectsDir: "~/Documents/Spike Data/Projects"
+
+treesDir: "~/Documents/Spike Data/Trees"
+
+distancesDir: "~/Documents/Spike Data/Distances"
+
+infoDir: "~/Documents/Spike Data/Info"
