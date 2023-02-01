@@ -14,4 +14,4 @@ Snapshots are collected by running **collect_snapshots.py** in the background fo
 ## Project files preparation
 Initial dataset preparation is performed using **prepare_dataset.py**. Choosing a folder containing extracted snapshots of the workshop sorted into folders by student IDs will produce student files in the **Projects** folder in the working directory. 
 ## Assessment and data mining
-For each task a set of correct solutions must be created and put inside a folder that will be used by **gt_parser.py**, where parameters for evaluation are chosen. Results are displayed and stored in tables in the working directory.
+For each task a set of correct solutions must be created and put inside a folder that will be used by **assess_task.py**, where parameters for evaluation are chosen. Results are displayed and stored in tables in the working directory.
