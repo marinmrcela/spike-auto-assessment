@@ -291,7 +291,7 @@ def block_params(blocks, variables, lists, broadcasts, flexible):
                         if i not in inds:
                             ls += [ls2[i]]
 
-            if 'port-selector' in blocks[key]['opcode'] and ls:  # Poredavanje portova po abecedi
+            if 'port-selector' in blocks[key]['opcode'] and ls:  # Sorting ports alphabetically
                 ls[0] = ''.join(sorted(ls[0]))
 
         out[key] = ls
