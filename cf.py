@@ -1,3 +1,4 @@
+# Some common functions for the programs.
 
 def directory_dialog(title='Choose the directory:'):
     import tkinter
