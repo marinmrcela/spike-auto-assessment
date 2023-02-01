@@ -2,7 +2,7 @@
 # Spike Auto Assessment
 Automatic assessment and data mining of projects built in Lego Spike app. Projects are evaluated through comparison with established, correct solutions. Parameters of evaluation and distance to the correct solution are adjustable. 
 ## Working directories 
-Working directories are defined in **paths.yml**. The initial directory is set to Documents/Spike Data. The subfolders are:
+Working directories are defined in **paths.yml**. The initial directory is set to **Documents/Spike Data**. The subfolders are:
 
  - **Projects** which will contain the parsed snapshots inside *json* files named after the student IDs,
  - **Trees** which will contain the tree files adjusted for assessment by the task,
