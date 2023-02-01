@@ -13,6 +13,8 @@ import concurrent.futures
 import pandas as pd
 
 from anytree import RenderTree, Node
+from tqdm import tqdm
+
 from cf import get_params, get_paths
 
 
@@ -77,6 +79,8 @@ def block_classifier(blocks, block_parts):
 
 
 def get_project(llsp_file):
+    # Extracts observed features from the llsp files.
+
     with zipfile.ZipFile(llsp_file, 'r') as zfile_outer:
         scratch = io.BytesIO(zfile_outer.read("scratch.sb3"))
         zfile_inner = zipfile.ZipFile(scratch, 'r')
@@ -124,6 +128,8 @@ def flatten_list_fast(lst, onlykeys):
 
 
 def tree_builder_fast(blocks, cleanup=False, onlykeep=None):
+    # Builds a tree equivalent of the graphical solution.
+
     all_keys = list(blocks.keys())
     block_parts = dict()
     secondary_blocks = dict()
@@ -237,10 +243,11 @@ def tree_builder_fast(blocks, cleanup=False, onlykeep=None):
 
 
 def tree_visualizer_short(blocks, block_parts, variables, lists, broadcasts, tree, flexible):
+    # Converts tree to plain text.
+
     tree_str = "\n"
     log_sup = block_params(blocks, variables, lists, broadcasts, flexible)
     for pre, fill, node in RenderTree(tree['root']):
-        # Crtanje stabla u obliku teksta
         try:
             tree_str += (pre + blocks[node.name]['opcode'] + str(log_sup[node.name]))
             if node.name in block_parts:
@@ -248,21 +255,15 @@ def tree_visualizer_short(blocks, block_parts, variables, lists, broadcasts, tre
                     tree_str += (" | " + blocks[part]['opcode'] + str(log_sup[part]))
             tree_str += "\n"
         except:
-            # Za glavni čvor ("root")
+            # Main node ("root")
             tree_str += (pre + node.name + "\n")
-
-    # tree_str += "\n"
 
     return tree_str
 
 
 def block_params(blocks, variables, lists, broadcasts, flexible):
-    # Vraća rječnik (varijabla out).
-    # Ključ rječnika je ključ bloka, vrijednost rječnika po ključu je lista (ls).
-    # Iz liste se izbacuju ključevi drugih blokova (ext_key_list),
-    # nepotrebni atributi (unused_attributes), None vrijednosti
-    # i vrijednosti koje nisu string.
-    # Cilj je zadržati samo nejedinstvene vrijednosti koje su prikazane u GUI-u.
+    # Filters block parameters by removing unused_attributes,
+    # block keys and all non-string values.
 
     out = dict()
     key_list = blocks.keys()
@@ -351,23 +352,23 @@ class TreeBuilder:
         folder_files = dict()
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            [executor.submit(self.create_tree_from_file, input_file,
-                             f"{self.out_folder}/{os.path.basename(input_file)}", folder_files)
-             for input_file in self.input_files]
-            # for _ in tqdm(concurrent.futures.as_completed(futures), total=len(futures),
-            #               bar_format='Creating trees:  {l_bar}{bar}|  {n_fmt}/{total_fmt}'):
-            #     pass
+            futures = [executor.submit(self.create_tree_from_file, input_file,
+                                       f"{self.out_folder}/{os.path.basename(input_file)}", folder_files)
+                       for input_file in self.input_files]
+            for _ in tqdm(concurrent.futures.as_completed(futures), total=len(futures),
+                          bar_format='Creating trees:  {l_bar}{bar}|  {n_fmt}/{total_fmt}'):
+                pass
 
         self.save_output(folder_files)
         print(f"\nTrees path: {self.out_folder}")
 
     def save_output(self, folder_files):
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            [executor.submit(self._save_output_file, out_file, folder_files[out_file])
-             for out_file in folder_files]
-            # for _ in tqdm(concurrent.futures.as_completed(futures), total=len(futures),
-            #               bar_format='Saving results:  {l_bar}{bar}|  {n_fmt}/{total_fmt}'):
-            #     pass
+            futures = [executor.submit(self._save_output_file, out_file, folder_files[out_file])
+                       for out_file in folder_files]
+            for _ in tqdm(concurrent.futures.as_completed(futures), total=len(futures),
+                          bar_format='Saving results:  {l_bar}{bar}|  {n_fmt}/{total_fmt}'):
+                pass
 
     @staticmethod
     def _save_output_file(out_file, output_data):
@@ -406,7 +407,8 @@ class TextMatching:
         for student_file in self.students:
             student = os.path.basename(student_file).split(".")[0].split(" ")[-1]
             self.results[student] = [0, 0, "", ""]
-        for student_file in self.students.keys():
+        for student_file in tqdm(self.students.keys(), total=len(self.students),
+                                 bar_format='Finding distance:  {l_bar}{bar}|  {n_fmt}/{total_fmt}'):
             student = os.path.basename(student_file).split(".")[0].split(" ")[-1]
             for file_pr, text_pr in self.students[student_file].items():
                 for file_gt_name, file_gt_text in self.files_gt.items():
@@ -557,7 +559,8 @@ class DataMiner:
             print(f"Using all steps from all students\n{self.last_file_text}\n")
             temp_table = [["Student", "Student File", "GT File"]]
             all_st = glob.glob(self.path_projects + r"/*.json")
-            for json_file in all_st:
+            for json_file in tqdm(all_st, total=len(all_st),
+                                  bar_format='Creating a temporary table:  {l_bar}{bar}|  {n_fmt}/{total_fmt}'):
                 with open(json_file, 'r', encoding='utf-8') as f:
                     lf = sorted(list(json.load(f).keys()))[-1]
                 st_id = os.path.basename(json_file).split(".")[0].split(" ")[-1]
@@ -568,7 +571,8 @@ class DataMiner:
 
         results = list()
 
-        for ind in corr.index:
+        for ind in tqdm(corr.index, total=len(corr.index),
+                        bar_format='Getting project data:        {l_bar}{bar}|  {n_fmt}/{total_fmt}'):
             student_id = corr['Student'][ind]
             student_file = corr['Student File'][ind]
             gt_file = corr['GT File'][ind]
@@ -782,7 +786,6 @@ class GTParser:
         print("\nGetting data...")
 
         projects_path = os.path.expanduser(self.paths["projectsdir"])
-        # distances_path = os.path.expanduser(self.paths["distancesdir"])
 
         input_csv = dist_out_file
         table_name = os.path.basename(input_csv).split(".csv")[0].replace("Distances ", "")
