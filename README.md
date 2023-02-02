@@ -36,5 +36,5 @@ graph TD
     E --> H
     F --> H
     G --> H
-    H --> I[Distance tables<br />Info tables<br />per task]
+    H --> I[The results can be viewed in distance tables<br />and info tables per each task.]
 ```
