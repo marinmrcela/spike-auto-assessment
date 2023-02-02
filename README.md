@@ -23,6 +23,7 @@ For each task a set of correct solutions must be created and put inside a folder
 ## Tree viewing
 Trees created for assessment from the original snapshots can be viewed using **tree_viewer.py**. 
 ## Step-by-step solution
+```mermaid
 graph TD
     A[Collect snapshots in Lego Spike workshops.] 
     A --> B[Unzip each file into a folder named after it,<br />keeping all the folders in one parent folder.]
@@ -36,3 +37,4 @@ graph TD
     F --> H
     G --> H
     H --> I[Distance tables<br />Info tables<br />per task]
+```
