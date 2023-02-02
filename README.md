@@ -1,6 +1,11 @@
 
 # Spike Auto Assessment
 Automatic assessment and data mining of projects built in Lego Spike app. Projects are evaluated through comparison with established, correct solutions. Parameters of evaluation and distance to the correct solution are adjustable. 
+## Requirements
+The project was built using Python version 3.10. The programs require additional packages: **anytree**, **levenshtein**, **pandas**, **pyyaml**, **tqdm**, **watchdog**. The command **pip install** can be used to install the packages:
+
+    pip install anytree levenshtein pandas pyyaml tqdm watchdog
+
 ## Working directories 
 Working directories are defined in **paths.yml**. The initial directory is set to **Documents/Spike Data**. The subfolders are:
 
