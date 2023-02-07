@@ -16,6 +16,75 @@ from anytree import RenderTree, Node
 from tqdm import tqdm
 
 from cf import get_params, get_paths
+from math import sqrt
+
+
+def filter_attributes(blocks):
+
+    filtered_blocks = dict()
+    for block, block_atts in blocks.items():
+        filtered_block_atts = dict()
+
+        opcode = block_atts['opcode']
+        _next = block_atts['next']
+        parent = block_atts['parent']
+        toplevel = block_atts['topLevel']
+
+        if opcode:
+            filtered_block_atts['opcode'] = opcode
+        if _next:
+            filtered_block_atts['next'] = _next
+        if parent:
+            filtered_block_atts['parent'] = parent
+        if toplevel:
+            # Initial block's coordinates are -130,120
+            x = block_atts['x'] + 130
+            y = block_atts['y'] - 120
+            distance = sqrt(x**2 + y**2)
+            filtered_block_atts['distance'] = distance
+
+        block_parts = list()
+        inputs = list()
+        # condition = ""
+        substack = ""
+        substack2 = ""
+
+        for input_key, input_value in block_atts['inputs'].items():
+            if input_key == "CONDITION":
+                condition = input_value[1]
+                # Conditions are treated as parts
+                block_parts.append(condition)
+            elif input_key == "SUBSTACK":
+                substack = input_value[1]
+            elif input_key == "SUBSTACK":
+                substack2 = input_value[1]
+            else:
+                flat_list = list(flatten_list_fast(input_value))
+                for element in flat_list:
+                    if len(element) == 20:
+                        block_parts.append(element)
+                    else:
+                        inputs.append(element)
+
+        if block_parts:
+            filtered_block_atts["parts"] = block_parts
+        if inputs:
+            filtered_block_atts["inputs"] = inputs
+        # if condition:
+        #     filtered_block_atts["condition"] = condition
+        if substack:
+            filtered_block_atts["substack"] = substack
+        if substack2:
+            filtered_block_atts["substack2"] = substack2
+
+        fields = list(block_atts['fields'].values())
+        fields_flat_list = list(flatten_list_fast(fields))
+        if fields_flat_list:
+            filtered_block_atts["fields"] = fields_flat_list
+
+        filtered_blocks[block] = filtered_block_atts
+
+    return filtered_blocks
 
 
 def block_classifier(blocks, block_parts):
@@ -44,36 +113,41 @@ def block_classifier(blocks, block_parts):
                    "data": "Variables",
                    "procedures": "My Blocks"}
 
-    parts = []
-    for values in block_parts.values():
-        for value in values:
-            parts.append(value)
+    primary_keys = set(blocks.keys())
+    secondary_keys = set()
 
-    for key, value in blocks.items():
-        if key not in parts:
-            opcode_main = blocks[key]['opcode']
-            opcode_main_short = opcode_main.split("_")[0]
+    for sublist in block_parts.values():
+        for item in sublist:
+            secondary_keys.add(item)
+
+    primary_keys -= secondary_keys
+
+    for primary_key in primary_keys:
+        opcode = blocks[primary_key]["opcode"]
+        opcode_start = opcode.split("_")[0]
+
+        check = True
+        for keyw in inv_keyword.keys():
+            if keyw in opcode_start:
+                keyword[inv_keyword[keyw]] += 1
+                check = False
+                break
+        if check:
+            raise Exception(f"Error categorizing block {opcode_start} ({opcode}).")
+
+        condition = blocks[primary_key].get("condition", None)
+        if condition:
+            condition_opcode = blocks[condition]["opcode"]
+            condition_opcode_start = condition_opcode.split("_")[0]
+
             check = True
             for keyw in inv_keyword.keys():
-                if keyw in opcode_main_short:
+                if keyw in condition_opcode_start:
                     keyword[inv_keyword[keyw]] += 1
                     check = False
                     break
             if check:
-                raise Exception(f"Error categorizing block {opcode_main}.")
-            if key in block_parts.keys():
-                for key2 in block_parts[key]:
-                    opcode_part = blocks[key2]['opcode']
-                    opcode_part_short = opcode_part.split("_")[0]
-                    if opcode_main_short != opcode_part_short:
-                        check = True
-                        for keyw2 in inv_keyword.keys():
-                            if keyw2 in opcode_part_short:
-                                keyword[inv_keyword[keyw2]] += 1
-                                check = False
-                                break
-                        if check:
-                            raise Exception(f"Error categorizing block {opcode_part}.")
+                raise Exception(f"Error categorizing block {condition_opcode_start} ({condition_opcode}).")
 
     return keyword
 
@@ -109,93 +183,89 @@ def get_project(llsp_file):
     return project_trimmed
 
 
-def flatten_list_fast(lst, onlykeys):
+def flatten_list_fast(lst):
     # Flattens nested lists keeping only strings.
     # Input lists are be deeper than two levels of nesting,
     # therefore chain.from_iterable() will not work.
-    # Onlykeys relies on the fact keys are 20 character long strings.
     for i in lst:
         if isinstance(i, list):
-            for x in flatten_list_fast(i, onlykeys):
+            for x in flatten_list_fast(i):
                 yield x
         else:
-            if onlykeys:
-                if i and isinstance(i, str) and len(i) == 20:
-                    yield i
-            else:
-                if i and isinstance(i, str):
-                    yield i
+            if i and isinstance(i, str):
+                yield i
 
 
 def tree_builder_fast(blocks, cleanup=False, onlykeep=None):
     # Builds a tree equivalent of the graphical solution.
 
-    all_keys = list(blocks.keys())
+    # Set of all block keys (unique).
+    all_keys = set(blocks.keys())
+    # Keys that are kept if onlykeys is used.
+    onlykeep_keys = set(all_keys)
+    # Keys of the primary blocks
+    primary_keys = set(all_keys)
+    # Key: value
+    # primary block: list of its parts.
     block_parts = dict()
-    secondary_blocks = dict()
-    primary_blocks = dict()
-    secondary_keys = list()
-    primary_keys = list()
 
-    roots = list()
-    parents = dict()
+    # Roots are the first blocks in stacks.
+    # Key: value
+    # root block key: distance from the centre of the coordinate system.
+    roots = dict()
+    # Key: value
+    # block key: block key of the next block.
     nexts = dict()
+    # Key: value
+    # block key: block key of the first block in its substack.
     substacks = dict()
+    # substacks 2 is used for the if-else statement.
+    # Key: value
+    # block key: block key of the first block in the second (e.g. else) substack.
     substacks2 = dict()
-    all_subs = list()
 
     if onlykeep:
-        onlykeep_keys = list()
+        onlykeep_keys = set()
         for key in all_keys:
             if blocks[key]["opcode"] in onlykeep:
-                onlykeep_keys.append(key)
-        all_keys = onlykeep_keys
+                onlykeep_keys.add(key)
+        primary_keys = set(onlykeep_keys)
 
-    for key in all_keys:
-        inputs = blocks[key]['inputs'].copy()
-        inputs.pop("SUBSTACK", None)
-        inputs.pop("SUBSTACK2", None)
-        block_contents = inputs.values()
-        block_contents_flat = flatten_list_fast(block_contents, onlykeys=True)
-        for key2 in block_contents_flat:
-            if key2 in all_keys:
-                secondary_keys.append(key2)
-                if key in block_parts:
-                    block_parts[key].append(key2)
-                else:
-                    block_parts[key] = [key2]
-
-    for key in all_keys:
-        if key in secondary_keys:
-            secondary_blocks[key] = blocks[key]
-        else:
-            primary_keys.append(key)
-            primary_blocks[key] = blocks[key]
+    for key in onlykeep_keys:
+        parts = blocks[key].get("parts", list())
+        # Remove parts that are no longer kept (onlykeep).
+        parts = [element for element in parts if element in onlykeep_keys]
+        if parts:
+            block_parts[key] = parts
+            parts_set = set(parts)
+            primary_keys -= parts_set
 
     for primary_key in primary_keys:
-        parent = blocks[primary_key]["parent"]
-        nextb = blocks[primary_key]["next"]
-        substack = blocks[primary_key]["inputs"].get("SUBSTACK", None)
-        substack2 = blocks[primary_key]["inputs"].get("SUBSTACK2", None)
-        if parent:
-            if parent in parents.keys():
-                parents[parent].append(primary_key)
-            else:
-                parents[parent] = [primary_key]
-        else:
+        block = blocks[primary_key]
+        parent = block.get("parent", None)
+        nextb = block.get("next", None)
+        substack = block.get("substack", None)
+        substack2 = block.get("substack2", None)
+
+        if not parent:
             if cleanup:
                 if "event" in blocks[primary_key]["opcode"]:
-                    roots.append(primary_key)
+                    roots[primary_key] = blocks[primary_key]["distance"]
             else:
-                roots.append(primary_key)
+                roots[primary_key] = blocks[primary_key]["distance"]
         if nextb:
             nexts[primary_key] = nextb
         if substack:
-            substacks[primary_key] = substack[1]  # Key is at the second place
-            all_subs.append(substack[1])
+            substacks[primary_key] = substack  # Key is at the second place
         if substack2:
-            substacks2[primary_key] = substack2[1]
-            all_subs.append(substack2[1])
+            substacks2[primary_key] = substack2
+
+    # List of sorted roots.
+    # Roots are sorted based on their distance from the centre of the coordinate system.
+    if len(roots) > 1:
+        sorted_roots = sorted(roots, key=lambda x: roots[x])
+    else:
+        sorted_roots = list(roots.keys())
 
     # Create tree
 
@@ -203,98 +273,91 @@ def tree_builder_fast(blocks, cleanup=False, onlykeep=None):
     tree['root'] = Node('root')
     for primary_key in primary_keys:
         tree[primary_key] = Node(primary_key)
-    tree['root'].children = tuple(tree[root] for root in roots)
+    tree['root'].children = tuple(tree[root] for root in sorted_roots)
 
     for key, value in substacks.items():
-        # Value can be none in case of empty substack
+        # Value can be none in case of an empty substack
         if value:
             s_children = list()
-            if value in all_keys:
-                s_children = [tree[value]]
-            nxt = blocks[value]["next"]
+            if value in onlykeep_keys:
+                s_children.append(tree[value])
+            nxt = blocks[value].get("next", None)
             while nxt:
-                if nxt in all_keys:
+                if nxt in onlykeep_keys:
                     s_children.append(tree[nxt])
-                nxt = blocks[nxt]["next"]
+                nxt = blocks[nxt].get("next", None)
             tree[key].children = tuple(s_children)
 
     for key, value in substacks2.items():
         if value:
             s_children = list(tree[key].children)
-            if value in all_keys:
+            if value in onlykeep_keys:
                 s_children.append(tree[value])
-            nxt = blocks[value]["next"]
+            nxt = blocks[value].get("next", None)
             while nxt:
-                if nxt in all_keys:
+                if nxt in onlykeep_keys:
                     s_children.append(tree[nxt])
-                nxt = blocks[nxt]["next"]
+                nxt = blocks[nxt].get("next", None)
             tree[key].children = tuple(s_children)
 
-    for root in roots:
+    for root in sorted_roots:
         r_children = list()
-        nxt = blocks[root]["next"]
+        nxt = blocks[root].get("next", None)
         while nxt:
-            if nxt in all_keys:
+            if nxt in onlykeep_keys:
                 r_children.append(tree[nxt])
-            nxt = blocks[nxt]["next"]
+            nxt = blocks[nxt].get("next", None)
         tree[root].children = tuple(r_children)
 
     return tree, block_parts
 
 
-def tree_visualizer_short(blocks, block_parts, variables, lists, broadcasts, tree, flexible):
+def tree_visualizer_short(blocks, block_parts, tree, flexible):
     # Converts tree to plain text.
 
     tree_str = "\n"
-    log_sup = block_params(blocks, variables, lists, broadcasts, flexible)
+    log_sup = block_params(blocks, flexible)
     for pre, fill, node in RenderTree(tree['root']):
-        try:
-            tree_str += (pre + blocks[node.name]['opcode'] + str(log_sup[node.name]))
+        if node.name == "root":
+            tree_str += f"{pre}root\n"
+        else:
+            tree_str += f"{pre}{blocks[node.name]['opcode']}{log_sup[node.name]}"
+            # If the node (block) has parts:
             if node.name in block_parts:
                 for part in block_parts[node.name]:
-                    tree_str += (" | " + blocks[part]['opcode'] + str(log_sup[part]))
+                    tree_str += f" | {blocks[part]['opcode']}{log_sup[part]}"
+                    # If the part has parts (subparts):
+                    if part in block_parts:
+                        for subpart in block_parts[part]:
+                            tree_str += f" | {blocks[subpart]['opcode']}{log_sup[subpart]}"
             tree_str += "\n"
-        except:
-            # Main node ("root")
-            tree_str += (pre + node.name + "\n")
 
     return tree_str
 
 
-def block_params(blocks, variables, lists, broadcasts, flexible):
+def block_params(blocks, flexible):
     # Filters block parameters by removing unused_attributes,
     # block keys and all non-string values.
+    # Returns a dictionary in which for each block as a key
+    # the value is a list of its parameters.
 
     out = dict()
-    key_list = blocks.keys()
-    ext_key_list = list(blocks.keys()) + list(variables.keys()) + list(lists.keys()) + list(broadcasts.keys())
-    unused_attributes = ['opcode', 'next', 'parent', 'shadow', 'topLevel', 'x', 'y']
 
-    for key in key_list:
-        if flexible and blocks[key]['opcode'] in flexible:
+    for block in blocks:
+        if flexible and blocks[block]['opcode'] in flexible:
             ls = ["FLEXIBLE"]
         else:
-            ls = []
 
-            for key2 in blocks[key]:
-                inds = []
-                if key2 not in unused_attributes:
-                    try:
-                        ls2_values = blocks[key][key2].values()
-                        ls2 = tuple(flatten_list_fast(ls2_values, onlykeys=False))
-                    except AttributeError:
-                        ls2 = tuple(blocks[key][key2])
-                    for i in range(len(ls2)):
-                        if ls2[i] in ext_key_list:
-                            inds += [i]
-                    for i in range(len(ls2)):
-                        if i not in inds:
-                            ls += [ls2[i]]
+            inputs = blocks[block].get('inputs', list())
+            fields = blocks[block].get('fields', list())
 
-            if 'port-selector' in blocks[key]['opcode'] and ls:  # Sorting ports alphabetically
+            ls = inputs + fields
+
+            # Sorting ports alphabetically
+            if ls and 'port-selector' in blocks[block]['opcode']:
                 ls[0] = ''.join(sorted(ls[0]))
 
-        out[key] = ls
+        out[block] = ls
 
     return out
 
@@ -339,13 +402,12 @@ class TreeBuilder:
 
         for student_file_name, student_file_content in student_files.items():
             blocks = student_file_content["blocks"]
-            variables = student_file_content["variables"]
-            lists = student_file_content["lists"]
-            broadcasts = student_file_content["broadcasts"]
+            # variables = student_file_content["variables"]
+            # lists = student_file_content["lists"]
+            # broadcasts = student_file_content["broadcasts"]
 
             tree, block_parts = tree_builder_fast(blocks, self.cleanup, self.onlykeep)
-            tree_str = tree_visualizer_short(blocks, block_parts, variables, lists, broadcasts, tree,
-                                             self.flexible)
+            tree_str = tree_visualizer_short(blocks, block_parts, tree, self.flexible)
             folder_files[out_file][student_file_name] = tree_str
 
     def create_trees(self):
@@ -474,12 +536,8 @@ class DataMiner:
 
     @staticmethod
     def get_count_fast(file):
-        blocks = len(file["blocks"])
-        variables = len(file["variables"])
-        lists = len(file["lists"])
-        broadcasts = len(file["broadcasts"])
-        _count = blocks + variables + lists + broadcasts
-        return _count
+        len_blocks = len(file["blocks"])
+        return len_blocks
 
     @staticmethod
     def get_last_block_data(file):
@@ -564,11 +622,12 @@ class DataMiner:
                 with open(json_file, 'r', encoding='utf-8') as f:
                     lf = sorted(list(json.load(f).keys()))[-1]
                 st_id = os.path.basename(json_file).split(".")[0].split(" ")[-1]
-                # Student id, last file, GT File placeholder
+                # Student id, last file, GT File replacement
                 temp_table.append([st_id, lf, "All Files"])
             # Set the first row as the header
             corr = pd.DataFrame(temp_table[1:], columns=temp_table[0])
 
+        print(f"There are {len(corr.index)} matches.\n")
         results = list()
 
         for ind in tqdm(corr.index, total=len(corr.index),
@@ -616,6 +675,7 @@ class VerticalScrolledFrame(ttk.Frame):
         def _configure_interior(event):
             # Update the scrollbars to match the size of the inner frame.
             size = (interior.winfo_reqwidth(), interior.winfo_reqheight())
+            # noinspection PyTypeChecker
             canvas.config(scrollregion="0 0 %s %s" % size)
             if interior.winfo_reqwidth() != canvas.winfo_width():
                 # Update the canvas's width to fit the inner frame.
@@ -647,7 +707,7 @@ class GTParser:
         self.llsp_files = list()
         self.flexible_values = dict()
         self.distinct_opcodes = set()
-        self.max_width = 154
+        self.max_width = 154  # Fits 1366x768
         self.max_height = 42
         self.trees_dict = dict()
         self.root = _root
@@ -711,7 +771,12 @@ class GTParser:
         file_format = [("YAML files", "*.yml")]
         files_name = ""
 
-        out_file = asksaveasfile(title="Save file as...", filetypes=file_format, defaultextension=".yml")
+        parameters_dir = os.path.expanduser(self.paths["parametersdir"])
+        if not os.path.isdir(parameters_dir):
+            os.makedirs(parameters_dir)
+
+        out_file = asksaveasfile(title="Save file as...", filetypes=file_format, defaultextension=".yml",
+                                 initialdir=parameters_dir)
         if out_file:
             files_name = out_file.name.split(".yml")[0]
 
@@ -827,9 +892,9 @@ class GTParser:
         for file in self.llsp_files:
             self.project = get_project(file)
             file_short = os.path.basename(file)
+            self.project["blocks"] = filter_attributes(self.project["blocks"])
             self.tree, self.block_parts = tree_builder_fast(self.project["blocks"])
-            tree_str = tree_visualizer_short(self.project["blocks"], self.block_parts, self.project["variables"],
-                                             self.project["lists"], self.project["broadcasts"],
+            tree_str = tree_visualizer_short(self.project["blocks"], self.block_parts,
                                              self.tree, flexible=self.flexible)
 
             self.trees_dict[file_short] = tree_str
@@ -839,11 +904,11 @@ class GTParser:
         self.distinct_opcodes = set()
         for file in self.llsp_files:
             self.project = get_project(file)
+            self.project["blocks"] = filter_attributes(self.project["blocks"])
             file_short = os.path.basename(file)
             self.distinct_opcodes = set(list(get_distinct_blocks(self.project["blocks"])) + list(self.distinct_opcodes))
             self.tree, self.block_parts = tree_builder_fast(self.project["blocks"])
-            tree_str = tree_visualizer_short(self.project["blocks"], self.block_parts, self.project["variables"],
-                                             self.project["lists"], self.project["broadcasts"],
+            tree_str = tree_visualizer_short(self.project["blocks"], self.block_parts,
                                              self.tree, flexible=self.flexible)
 
             self.trees_dict[file_short] = tree_str
@@ -884,7 +949,7 @@ class GTParser:
 
     def choose_folder(self):
         # Open file dialog to choose folder
-        folder_path = filedialog.askdirectory()
+        folder_path = filedialog.askdirectory(title="Choose the ground truth folder")
         self.llsp_files = list(glob.glob(f"{folder_path}/*.llsp")) + list(glob.glob(f"{folder_path}/*.llsp3"))
         self.choose_folder_button["state"] = "disabled"
         self.save_button["state"] = "normal"

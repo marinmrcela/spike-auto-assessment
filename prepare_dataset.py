@@ -6,16 +6,97 @@ import json
 import os
 from tqdm import tqdm
 import concurrent.futures
+from math import sqrt
+
+
+def flatten_list_fast(lst):
+    # Flattens nested lists keeping only strings.
+    # Input lists are be deeper than two levels of nesting,
+    # therefore chain.from_iterable() will not work.
+    for i in lst:
+        if isinstance(i, list):
+            for x in flatten_list_fast(i):
+                yield x
+        else:
+            if i and isinstance(i, str):
+                yield i
+
+
+def filter_attributes(blocks):
+
+    filtered_blocks = dict()
+    for block, block_atts in blocks.items():
+        filtered_block_atts = dict()
+
+        opcode = block_atts['opcode']
+        _next = block_atts['next']
+        parent = block_atts['parent']
+        toplevel = block_atts['topLevel']
+
+        filtered_block_atts['opcode'] = opcode
+        if _next:
+            filtered_block_atts['next'] = _next
+        if parent:
+            filtered_block_atts['parent'] = parent
+        if toplevel:
+            # Initial block's coordinates are -130,120
+            x = block_atts['x'] + 130
+            y = block_atts['y'] - 120
+            distance = sqrt(x**2 + y**2)
+            filtered_block_atts['distance'] = distance
+
+        block_parts = list()
+        inputs = list()
+        condition = ""
+        substack = ""
+        substack2 = ""
+
+        for input_key, input_value in block_atts['inputs'].items():
+            if input_key == "CONDITION":
+                condition = input_value[1]
+                # Conditions are treated as parts in visualization,
+                # but they are counted as primary blocks in classification.
+                block_parts.append(condition)
+            elif input_key == "SUBSTACK":
+                substack = input_value[1]
+            elif input_key == "SUBSTACK":
+                substack2 = input_value[1]
+            else:
+                flat_list = list(flatten_list_fast(input_value))
+                for element in flat_list:
+                    if len(element) == 20:
+                        block_parts.append(element)
+                    else:
+                        inputs.append(element)
+
+        if block_parts:
+            filtered_block_atts["parts"] = block_parts
+        if inputs:
+            filtered_block_atts["inputs"] = inputs
+        if condition:
+            filtered_block_atts["condition"] = condition
+        if substack:
+            filtered_block_atts["substack"] = substack
+        if substack2:
+            filtered_block_atts["substack2"] = substack2
+
+        fields = list(block_atts['fields'].values())
+        fields_flat_list = list(flatten_list_fast(fields))
+        if fields_flat_list:
+            filtered_block_atts["fields"] = fields_flat_list
+
+        filtered_blocks[block] = filtered_block_atts
+
+    return filtered_blocks
 
 
 class LLSPProcessor:
     def __init__(self, _path, _out_folder_name):
         self.path = _path
-        self.out_folder_name = os.path.normpath(_out_folder_name)
         self.folders_all = glob.glob(f'{_path}/*/')
         self.folders = []
         self.projects = {}
-        self.out_folder = os.path.normpath(self.out_folder_name)
+        self.out_folder = os.path.normpath(_out_folder_name)
 
     @staticmethod
     def get_project(llsp_file):
@@ -28,6 +109,7 @@ class LLSPProcessor:
 
         blocks = project["targets"][0]["blocks"]
         blocks.update(project["targets"][1]["blocks"])
+        blocks_filtered = filter_attributes(blocks)
 
         variables = project["targets"][0]["variables"]
         variables.update(project["targets"][1]["variables"])
@@ -39,7 +121,7 @@ class LLSPProcessor:
         broadcasts.update(project["targets"][1]["broadcasts"])
 
         project_trimmed = dict()
-        project_trimmed["blocks"] = blocks
+        project_trimmed["blocks"] = blocks_filtered
         project_trimmed["broadcasts"] = broadcasts
         project_trimmed["lists"] = lists
         project_trimmed["variables"] = variables
@@ -84,7 +166,6 @@ class LLSPProcessor:
                         print(f'{file} generated an exception: {exc}')
 
     def create_output_folder(self):
-        # self.out_folder = os.path.normpath(self.out_folder_name)
         if not os.path.isdir(self.out_folder):
             os.makedirs(self.out_folder)
 

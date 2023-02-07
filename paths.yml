@@ -9,3 +9,5 @@ treesDir: "~/Documents/Spike Data/Trees"
 distancesDir: "~/Documents/Spike Data/Distances"
 
 infoDir: "~/Documents/Spike Data/Info"
+
+parametersDir: "~/Documents/Spike Data/Parameters"
