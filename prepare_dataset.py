@@ -40,8 +40,8 @@ def filter_attributes(blocks):
             filtered_block_atts['parent'] = parent
         if toplevel:
             # Initial block's coordinates are -130,120
-            x = block_atts['x'] + 130
-            y = block_atts['y'] - 120
+            x = block_atts['x'] + 130.0
+            y = block_atts['y'] - 120.0
             distance = sqrt(x**2 + y**2)
             filtered_block_atts['distance'] = distance
 
@@ -53,13 +53,15 @@ def filter_attributes(blocks):
 
         for input_key, input_value in block_atts['inputs'].items():
             if input_key == "CONDITION":
-                condition = input_value[1]
-                # Conditions are treated as parts in visualization,
-                # but they are counted as primary blocks in classification.
-                block_parts.append(condition)
+                in_val = input_value[1]
+                if in_val:  # Not none
+                    condition = in_val
+                    # Conditions are treated as parts in visualization,
+                    # but they are counted as primary blocks in classification.
+                    block_parts.append(condition)
             elif input_key == "SUBSTACK":
                 substack = input_value[1]
-            elif input_key == "SUBSTACK":
+            elif input_key == "SUBSTACK2":
                 substack2 = input_value[1]
             else:
                 flat_list = list(flatten_list_fast(input_value))
