@@ -1,90 +1,19 @@
+import concurrent.futures
+import csv
 import glob
-import io
 import json
 import os.path
 import tkinter as tk
-from tkinter import ttk
-import zipfile
-import Levenshtein
-import csv
 from tkinter import filedialog
+from tkinter import ttk
 from tkinter.filedialog import asksaveasfile
-import concurrent.futures
-import pandas as pd
 
+import Levenshtein
+import pandas as pd
 from anytree import RenderTree, Node
 from tqdm import tqdm
 
-from cf import get_params, get_paths
-from math import sqrt
-
-
-def filter_attributes(blocks):
-
-    filtered_blocks = dict()
-    for block, block_atts in blocks.items():
-        filtered_block_atts = dict()
-
-        opcode = block_atts['opcode']
-        _next = block_atts['next']
-        parent = block_atts['parent']
-        toplevel = block_atts['topLevel']
-
-        if opcode:
-            filtered_block_atts['opcode'] = opcode
-        if _next:
-            filtered_block_atts['next'] = _next
-        if parent:
-            filtered_block_atts['parent'] = parent
-        if toplevel:
-            # Initial block's coordinates are -130,120
-            x = block_atts['x'] + 130
-            y = block_atts['y'] - 120
-            distance = sqrt(x**2 + y**2)
-            filtered_block_atts['distance'] = distance
-
-        block_parts = list()
-        inputs = list()
-        # condition = ""
-        substack = ""
-        substack2 = ""
-
-        for input_key, input_value in block_atts['inputs'].items():
-            if input_key == "CONDITION":
-                condition = input_value[1]
-                # Conditions are treated as parts
-                block_parts.append(condition)
-            elif input_key == "SUBSTACK":
-                substack = input_value[1]
-            elif input_key == "SUBSTACK":
-                substack2 = input_value[1]
-            else:
-                flat_list = list(flatten_list_fast(input_value))
-                for element in flat_list:
-                    if len(element) == 20:
-                        block_parts.append(element)
-                    else:
-                        inputs.append(element)
-
-        if block_parts:
-            filtered_block_atts["parts"] = block_parts
-        if inputs:
-            filtered_block_atts["inputs"] = inputs
-        # if condition:
-        #     filtered_block_atts["condition"] = condition
-        if substack:
-            filtered_block_atts["substack"] = substack
-        if substack2:
-            filtered_block_atts["substack2"] = substack2
-
-        fields = list(block_atts['fields'].values())
-        fields_flat_list = list(flatten_list_fast(fields))
-        if fields_flat_list:
-            filtered_block_atts["fields"] = fields_flat_list
-
-        filtered_blocks[block] = filtered_block_atts
-
-    return filtered_blocks
+from cf import get_params, get_paths, get_project
 
 
 def block_classifier(blocks, block_parts):
@@ -152,50 +81,6 @@ def block_classifier(blocks, block_parts):
     return keyword
 
 
-def get_project(llsp_file):
-    # Extracts observed features from the llsp files.
-
-    with zipfile.ZipFile(llsp_file, 'r') as zfile_outer:
-        scratch = io.BytesIO(zfile_outer.read("scratch.sb3"))
-        zfile_inner = zipfile.ZipFile(scratch, 'r')
-        project_json = zfile_inner.read("project.json")
-
-    project = json.loads(project_json.decode("utf-8"))
-
-    blocks = project["targets"][0]["blocks"]
-    blocks.update(project["targets"][1]["blocks"])
-
-    variables = project["targets"][0]["variables"]
-    variables.update(project["targets"][1]["variables"])
-
-    lists = project["targets"][0]["lists"]
-    lists.update(project["targets"][1]["lists"])
-
-    broadcasts = project["targets"][0]["broadcasts"]
-    broadcasts.update(project["targets"][1]["broadcasts"])
-
-    project_trimmed = dict()
-    project_trimmed["blocks"] = blocks
-    project_trimmed["broadcasts"] = broadcasts
-    project_trimmed["lists"] = lists
-    project_trimmed["variables"] = variables
-
-    return project_trimmed
-
-
-def flatten_list_fast(lst):
-    # Flattens nested lists keeping only strings.
-    # Input lists are be deeper than two levels of nesting,
-    # therefore chain.from_iterable() will not work.
-    for i in lst:
-        if isinstance(i, list):
-            for x in flatten_list_fast(i):
-                yield x
-        else:
-            if i and isinstance(i, str):
-                yield i
-
-
 def tree_builder_fast(blocks, cleanup=False, onlykeep=None):
     # Builds a tree equivalent of the graphical solution.
 
@@ -219,7 +104,7 @@ def tree_builder_fast(blocks, cleanup=False, onlykeep=None):
     # Key: value
     # block key: block key of the first block in its substack.
     substacks = dict()
-    # substacks 2 is used for the if-else statement.
+    # substacks 2 is used for the "else" part of the "if-else" statement.
     # Key: value
     # block key: block key of the first block in the second (e.g. else) substack.
     substacks2 = dict()
@@ -242,12 +127,12 @@ def tree_builder_fast(blocks, cleanup=False, onlykeep=None):
 
     for primary_key in primary_keys:
         block = blocks[primary_key]
-        parent = block.get("parent", None)
+        toplevel = block.get("topLevel", None)
         nextb = block.get("next", None)
         substack = block.get("substack", None)
         substack2 = block.get("substack2", None)
 
-        if not parent:
+        if toplevel:
             if cleanup:
                 if "event" in blocks[primary_key]["opcode"]:
                     roots[primary_key] = blocks[primary_key]["distance"]
@@ -261,7 +146,8 @@ def tree_builder_fast(blocks, cleanup=False, onlykeep=None):
             substacks2[primary_key] = substack2
 
     # List of sorted roots.
-    # Roots are sorted based on their distance from the centre of the coordinate system.
+    # Roots are sorted based on their distance from the centre of the coordinate system,
+    # which is in this project defined as the location of the initial block.
     if len(roots) > 1:
         sorted_roots = sorted(roots, key=lambda x: roots[x])
     else:
@@ -312,7 +198,7 @@ def tree_builder_fast(blocks, cleanup=False, onlykeep=None):
     return tree, block_parts
 
 
-def tree_visualizer_short(blocks, block_parts, tree, flexible):
+def tree_visualizer(blocks, block_parts, tree, flexible):
     # Converts tree to plain text.
 
     tree_str = "\n"
@@ -370,6 +256,8 @@ def get_distinct_blocks(blocks):
 
 
 class TreeBuilder:
+    # Loads parsed project json files and creates textual trees.
+    # Results are saved as json files named after the loaded files.
     def __init__(self, _path, _out_folder_name, _path_params=None):
         self.path_params = _path_params
         self.out_folder_name = _out_folder_name
@@ -402,12 +290,8 @@ class TreeBuilder:
 
         for student_file_name, student_file_content in student_files.items():
             blocks = student_file_content["blocks"]
-            # variables = student_file_content["variables"]
-            # lists = student_file_content["lists"]
-            # broadcasts = student_file_content["broadcasts"]
-
             tree, block_parts = tree_builder_fast(blocks, self.cleanup, self.onlykeep)
-            tree_str = tree_visualizer_short(blocks, block_parts, tree, self.flexible)
+            tree_str = tree_visualizer(blocks, block_parts, tree, self.flexible)
             folder_files[out_file][student_file_name] = tree_str
 
     def create_trees(self):
@@ -439,6 +323,8 @@ class TreeBuilder:
 
 
 class TextMatching:
+    # Evaluates each snapshots based on the Levenshtein distance from the ground truth examples.
+    # Each student's nearest snapshot is saved in the "distances" table.
     def __init__(self, _path_gt, _path_pr, _out_folder, _out_file):
         self.path_gt = _path_gt
         self.path_pr = _path_pr
@@ -479,6 +365,8 @@ class TextMatching:
                         ld = Levenshtein.distance(file_gt_text, text_pr)
                         file_pr_short = os.path.basename(file_pr)
                         self.results[student] = [lr, ld, file_gt_name, file_pr_short]
+                    if lr == 1:
+                        break
 
     def save_to_csv(self):
         header = ["Student", "Ratio", "Distance", "GT File", "Student File"]
@@ -512,6 +400,8 @@ class TextMatching:
 
 
 class DataMiner:
+    # Extracts features of the project by each student
+    # and saves them in the "info" table.
     def __init__(self, _path_projects, _input_csv, _output_folder,
                  _output_csv, _max_distance, _last_file_only, _header):
         self.path_projects = _path_projects
@@ -650,10 +540,11 @@ class DataMiner:
 
 
 class VerticalScrolledFrame(ttk.Frame):
+    # Default frames are not scrollable
     def __init__(self, parent, *args, **kw):
         ttk.Frame.__init__(self, parent, *args, **kw)
 
-        # Create a canvas object and a vertical scrollbar for scrolling it.
+        # Create a canvas object and a vertical scrollbar for scrolling it
         vscrollbar = ttk.Scrollbar(self, orient=tk.VERTICAL)
         vscrollbar.pack(fill=tk.Y, side=tk.RIGHT, expand=tk.FALSE)
         canvas = tk.Canvas(self, bd=0, highlightthickness=0,
@@ -665,31 +556,32 @@ class VerticalScrolledFrame(ttk.Frame):
         canvas.xview_moveto(0)
         canvas.yview_moveto(0)
 
-        # Create a frame inside the canvas which will be scrolled with it.
+        # Create a frame inside the canvas which will be scrolled with it
         self.interior = interior = ttk.Frame(canvas)
         interior_id = canvas.create_window(0, 0, window=interior,
                                            anchor=tk.NW)
 
         # Track changes to the canvas and frame width and sync them,
-        # also updating the scrollbar.
+        # also updating the scrollbar
         def _configure_interior(event):
-            # Update the scrollbars to match the size of the inner frame.
+            # Update the scrollbars to match the size of the inner frame
             size = (interior.winfo_reqwidth(), interior.winfo_reqheight())
             # noinspection PyTypeChecker
             canvas.config(scrollregion="0 0 %s %s" % size)
             if interior.winfo_reqwidth() != canvas.winfo_width():
-                # Update the canvas's width to fit the inner frame.
+                # Update the canvas's width to fit the inner frame
                 canvas.config(width=interior.winfo_reqwidth())
         interior.bind('<Configure>', _configure_interior)
 
         def _configure_canvas(event):
             if interior.winfo_reqwidth() != canvas.winfo_width():
-                # Update the inner frame's width to fill the canvas.
+                # Update the inner frame's width to fill the canvas
                 canvas.itemconfigure(interior_id, width=canvas.winfo_width())
         canvas.bind('<Configure>', _configure_canvas)
 
 
 class GTParser:
+    # GUI
     def __init__(self, _root, _paths):
         self.entry = None
         self.gt_file = ""
@@ -810,6 +702,7 @@ class GTParser:
         tk.Label(secondary_window, text="").pack()
         close_button = tk.Button(secondary_window, text="Get data", command=self.get_data)
         close_button.pack()
+        tk.Label(secondary_window, text="").pack()
         secondary_window.protocol("WM_DELETE_WINDOW", lambda: self.root.deiconify())
 
     def get_data(self):
@@ -892,10 +785,10 @@ class GTParser:
         for file in self.llsp_files:
             self.project = get_project(file)
             file_short = os.path.basename(file)
-            self.project["blocks"] = filter_attributes(self.project["blocks"])
+            # self.project["blocks"] = filter_attributes(self.project["blocks"])
             self.tree, self.block_parts = tree_builder_fast(self.project["blocks"])
-            tree_str = tree_visualizer_short(self.project["blocks"], self.block_parts,
-                                             self.tree, flexible=self.flexible)
+            tree_str = tree_visualizer(self.project["blocks"], self.block_parts,
+                                       self.tree, flexible=self.flexible)
 
             self.trees_dict[file_short] = tree_str
 
@@ -904,12 +797,12 @@ class GTParser:
         self.distinct_opcodes = set()
         for file in self.llsp_files:
             self.project = get_project(file)
-            self.project["blocks"] = filter_attributes(self.project["blocks"])
+            # self.project["blocks"] = filter_attributes(self.project["blocks"])
             file_short = os.path.basename(file)
             self.distinct_opcodes = set(list(get_distinct_blocks(self.project["blocks"])) + list(self.distinct_opcodes))
             self.tree, self.block_parts = tree_builder_fast(self.project["blocks"])
-            tree_str = tree_visualizer_short(self.project["blocks"], self.block_parts,
-                                             self.tree, flexible=self.flexible)
+            tree_str = tree_visualizer(self.project["blocks"], self.block_parts,
+                                       self.tree, flexible=self.flexible)
 
             self.trees_dict[file_short] = tree_str
 
