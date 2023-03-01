@@ -26,7 +26,7 @@ A folder needs to be created for each task, which contains a set of correct solu
  - **Flexible**: the values of the checked blocks will not affect the assessment.
  - **Use data from all students**: if checked, data from all of the students will be used for data mining, not just from the students that have correctly solved the task.
  - **Categorize last data point only**: if checked, only blocks from the last snapshot will be categorized, instead of using all of the prior snapshots as well.
- - **Maximum distance**: maximum number of insertions, removals or replacements of a character needed to transform a student's snapshot in form of the text equivalent to match the nearest ground truth example. For instance, setting the maximum distance to 0 will only allow the solutions that are identical to the ground truth examples to be graded as correct. Setting the maximum distance to 2 will allow, for instance, setting the number of rotations of a motor to 5 where 10 in expected.
+ - **Maximum distance**: maximum number of insertions, removals or replacements of a character needed to transform a student's snapshot in form of the text equivalent to match the nearest ground truth example. For instance, setting the maximum distance to 0 will only allow the solutions that are identical to the ground truth examples to be graded as correct. Setting the maximum distance to 2 will allow, for instance, setting the number of rotations of a motor to 5 where 10 is expected.
 
 The parameters of evaluation are task-specific. Results of evaluation are displayed in the console and stored in tables in the working directory.
 ## Step-by-step solution
